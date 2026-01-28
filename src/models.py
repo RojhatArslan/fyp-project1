@@ -35,5 +35,13 @@ def train_linear_regression(data_path: Path):
     print(f"RMSE: {rmse:.2f}")
     print(f"R2: {r2:.2f}")
 
-    return mae,rmse,r2
+    return {
+        "model": "Linear Regression",
+        "MAE": mae,
+        "RMSE": rmse,
+        "R2": r2,
+    }
     
+if __name__ == "__main__":
+    DATA = Path("data/processed/daily_features.csv")
+    train_linear_regression(DATA)
