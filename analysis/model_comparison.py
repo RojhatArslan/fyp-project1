@@ -30,7 +30,7 @@ results = {
 }
 
 results_df = pd.DataFrame(results).T
-results_df
+results_df.round(3)
 
 
 
@@ -39,9 +39,14 @@ plt.ylabel("RMSE")
 plt.title("Model Comparison Based on RMSE")
 plt.tight_layout()
 plt.show()
-plt.savefig("results/figures/rmse_model_comparison.png", dpi=300)
+
 results_df["R2"].sort_values(ascending=False).plot(kind="bar")
 plt.ylabel("R²")
 plt.title("Model Comparison Based on R²")
+plt.tight_layout()
+plt.show()
+results_df["MAE"].sort_values().plot(kind="bar")
+plt.ylabel("MAE")
+plt.title("Model Comparison Based on MAE")
 plt.tight_layout()
 plt.show()
