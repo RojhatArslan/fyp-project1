@@ -6,11 +6,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error,mean_squared_error,r2_score
 
 
-def train_random_forest(data_path: Path):
-    """
-    Train and evaluate a Random Forest regression model
-    using a time-based train/test split.
-    """
+def train_random_forest(data_path: Path): # Train and evaluate a Random Forest regression model
 
     df = pd.read_csv(data_path, parse_dates=["ds"])
     df = df.sort_values("ds").reset_index(drop=True)
