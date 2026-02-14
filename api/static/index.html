@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Demand Forecasting</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .content { padding: 40px; }
+        .form-group { margin-bottom: 25px; }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        input[type="date"], input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        input:focus { outline: none; border-color: #667eea; }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .loading { text-align: center; padding: 20px; color: #667eea; display: none; }
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+        .results { margin-top: 30px; display: none; }
+        .daily-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .day-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .day-card .date { font-weight: 600; color: #667eea; margin-bottom: 8px; }
+        .day-card .bookings { font-size: 1.5em; font-weight: bold; color: #333; }
+        .chart-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .hourly-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .hourly-bar .hour { width: 80px; font-size: 0.9em; color: #666; }
+        .hourly-bar .bar {
+            flex: 1;
+            height: 24px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .hourly-bar .value { width: 60px; text-align: right; font-weight: 600; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍽️ Restaurant Demand Forecasting</h1>
+            <p>Predict future booking demand</p>
+        </div>
+        <div class="content">
+            <form id="predictionForm">
+                <div class="form-group">
+                    <label for="startDate">Start Date</label>
+                    <input type="date" id="startDate" name="startDate" required>
+                </div>
+                <div class="form-group">
+                    <label for="horizonDays">Forecast Horizon (days, max 14)</label>
+                    <input type="number" id="horizonDays" name="horizonDays" min="1" max="14" value="7" required>
+                </div>
+                <button type="submit" id="submitBtn">Generate Forecast</button>
+            </form>
+            <div class="loading" id="loading">⏳ Generating predictions...</div>
+            <div class="error" id="error"></div>
+            <div class="results" id="results">
+                <h2>📊 Forecast Results</h2>
+                <div class="daily-summary" id="dailySummary"></div>
+                <div class="chart-container">
+                    <h3>Hourly Predictions</h3>
+                    <div id="hourlyChart"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const API_URL = 'http://localhost:8000';
+        // Set default date to tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        document.getElementById('startDate').valueAsDate = tomorrow;
+        
+        document.getElementById('predictionForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const startDate = document.getElementById('startDate').value;
+            const horizonDays = parseInt(document.getElementById('horizonDays').value);
+            const submitBtn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const results = document.getElementById('results');
+            
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            results.style.display = 'none';
+            
+            try {
+                const response = await fetch(`${API_URL}/predict`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start_date: startDate, horizon_days: horizonDays })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to generate predictions');
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (err) {
+                error.textContent = `Error: ${err.message}`;
+                error.style.display = 'block';
+            } finally {
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        });
+        
+        function displayResults(data) {
+            const results = document.getElementById('results');
+            const dailySummary = document.getElementById('dailySummary');
+            const hourlyChart = document.getElementById('hourlyChart');
+            
+            // Display daily summary
+            dailySummary.innerHTML = '';
+            if (data.aggregated_daily) {
+                data.aggregated_daily.forEach(day => {
+                    const card = document.createElement('div');
+                    card.className = 'day-card';
+                    card.innerHTML = `
+                        <div class="date">${day.date}</div>
+                        <div class="bookings">${Math.round(day.total_bookings)}</div>
+                        <div style="font-size: 0.9em; color: #666;">bookings</div>
+                    `;
+                    dailySummary.appendChild(card);
+                });
+            }
+            
+            // Display hourly chart
+            hourlyChart.innerHTML = '';
+            const maxPred = Math.max(...data.predictions);
+            data.dates.forEach((date, idx) => {
+                const pred = data.predictions[idx];
+                const bar = document.createElement('div');
+                bar.className = 'hourly-bar';
+                const hour = date.split(' ')[1].split(':')[0];
+                const dateOnly = date.split(' ')[0];
+                const width = (pred / maxPred) * 100;
+                bar.innerHTML = `
+                    <div class="hour">${dateOnly} ${hour}:00</div>
+                    <div class="bar" style="width: ${width}%"></div>
+                    <div class="value">${Math.round(pred)}</div>
+                `;
+                hourlyChart.appendChild(bar);
+            });
+            results.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
