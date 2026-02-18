@@ -1,8 +1,9 @@
 """FastAPI backend for Restaurant Demand Forecasting."""
 
-from datetime import timedelta
+from datetime import timedelta, datetime
 from pathlib import Path
 from typing import List, Optional
+from contextlib import asynccontextmanager
 import pickle
 
 import pandas as pd
@@ -11,13 +12,83 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from api.features import create_features_for_date
+try:
+    from api.features import create_features_for_date
+except ImportError:
+    from features import create_features_for_date
+
+# Paths resolved before lifespan so they are available at startup
+_base_dir = Path(__file__).resolve().parent.parent
+MODEL_PATH = _base_dir / "models" / "final_xgb_model.pkl"
+HISTORICAL_DATA_PATH = _base_dir / "data" / "processed" / "daily_bookings.csv"
+model: Optional[object] = None
+feature_columns: Optional[list] = None
+historical_df: Optional[pd.DataFrame] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown."""
+    global model, feature_columns, historical_df
+    
+    print(f"Starting model load...")
+    print(f"Model path: {MODEL_PATH}")
+    print(f"Model path exists: {MODEL_PATH.exists()}")
+    
+    # Load model
+    if MODEL_PATH.exists():
+        try:
+            with open(MODEL_PATH, "rb") as f:
+                model_data = pickle.load(f)
+                
+                if isinstance(model_data, dict):
+                    model = model_data.get("model")
+                    feature_columns = model_data.get("feature_columns")
+                else:
+                    model = model_data
+                    feature_columns = None
+            
+            print(f"Model loaded from {MODEL_PATH}")
+            if feature_columns:
+                print(f"Feature columns: {feature_columns}")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"Warning: Model not found at {MODEL_PATH}")
+    
+    # Load historical data
+    try:
+        if HISTORICAL_DATA_PATH.exists():
+            temp_df = pd.read_csv(HISTORICAL_DATA_PATH)
+            if "date" in temp_df.columns:
+                temp_df["ds"] = pd.to_datetime(temp_df["date"])
+            elif "ds" in temp_df.columns:
+                temp_df["ds"] = pd.to_datetime(temp_df["ds"])
+            if "ds" in temp_df.columns:
+                historical_df = temp_df.sort_values("ds").reset_index(drop=True)
+                print(f"Historical data loaded: {len(historical_df)} records")
+            else:
+                historical_df = None
+        else:
+            historical_df = None
+    except Exception as e:
+        print(f"Error loading historical data: {e}")
+        historical_df = None
+    
+    yield
+    
+    # Shutdown (if needed)
+    print("Shutting down...")
+
 
 # Initialize FastAPI application
 app = FastAPI(
     title="Restaurant Demand Forecasting API",
     description="API for predicting restaurant booking demand",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Configure CORS for frontend requests
@@ -29,37 +100,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Model configuration - loaded at startup
-MODEL_PATH = Path("models/final_xgb_model.pkl")
-model: Optional[object] = None
-feature_columns: Optional[list] = None
+# Model and historical data (loaded at startup, see lifespan above)
 
 
-@app.on_event("startup")
-async def load_model():
-    """Load XGBoost model and feature columns at startup."""
-    global model, feature_columns
-    
-    if not MODEL_PATH.exists():
-        print(f"Warning: Model not found at {MODEL_PATH}")
-        return
-    
-    try:
-        with open(MODEL_PATH, "rb") as f:
-            model_data = pickle.load(f)
-            
-            # Handle both dict format and direct model object
-            if isinstance(model_data, dict):
-                model = model_data.get("model")
-                feature_columns = model_data.get("feature_columns")
-            else:
-                model = model_data
-                # Default feature columns matching features.py
-                feature_columns = ["day_of_week", "month", "lag_7", "rolling_7"]
-        
-        print(f"Model loaded from {MODEL_PATH}")
-    except Exception as e:
-        print(f"Error loading model: {e}")
 
 
 # Request/Response models
@@ -116,12 +159,22 @@ def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str],
         # Reorder to match training feature order
         df_features = df_features[feature_columns]
     else:
-        # Default features from features.py
-        default_cols = ["day_of_week", "month", "lag_7", "rolling_7"]
-        for col in default_cols:
-            if col not in df_features.columns:
-                df_features[col] = 0.0
-        df_features = df_features[default_cols]
+        # Use feature columns from saved model
+        if feature_columns:
+            for col in feature_columns:
+                if col not in df_features.columns:
+                    df_features[col] = 0.0
+            df_features = df_features[feature_columns]
+        else:
+            # Fallback default features
+            default_cols = ["hour", "day_of_week", "month", "is_peak_hour", 
+                          "NewYearsDay", "ValentinesDay", "MothersDay", 
+                          "EasterSunday", "ChristmasDay", "total_guests", 
+                          "avg_party_size", "lag_7", "rolling_7"]
+            for col in default_cols:
+                if col not in df_features.columns:
+                    df_features[col] = 0.0
+            df_features = df_features[default_cols]
     
     # Generate predictions
     predictions = model.predict(df_features)
@@ -172,12 +225,82 @@ async def root():
     return {"message": "API is running. Use /predict endpoint", "docs": "/docs"}
 
 
+def _ensure_historical_loaded() -> bool:
+    """Load historical data from file if not already loaded."""
+    global historical_df
+    if historical_df is not None:
+        return True
+    if not HISTORICAL_DATA_PATH.exists():
+        return False
+    try:
+        temp_df = pd.read_csv(HISTORICAL_DATA_PATH)
+        if "date" in temp_df.columns:
+            temp_df["ds"] = pd.to_datetime(temp_df["date"])
+        elif "ds" in temp_df.columns:
+            temp_df["ds"] = pd.to_datetime(temp_df["ds"])
+        if "ds" in temp_df.columns:
+            historical_df = temp_df.sort_values("ds").reset_index(drop=True)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+@app.get("/historical")
+async def get_historical(start_date: str, end_date: str):
+    """Get historical booking data for date range."""
+    if historical_df is None and not _ensure_historical_loaded():
+        raise HTTPException(status_code=503, detail="Historical data not loaded")
+    
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    
+    # Filter historical data - handle both datetime and date columns
+    if "ds" in historical_df.columns:
+        mask = (pd.to_datetime(historical_df["ds"]) >= start) & (pd.to_datetime(historical_df["ds"]) <= end)
+        filtered = historical_df[mask].copy()
+    else:
+        return {"dates": [], "bookings": [], "message": "No 'ds' column found in historical data"}
+    
+    if len(filtered) == 0:
+        return {"dates": [], "bookings": [], "message": "No data found for date range"}
+    
+    # Check which columns exist - handle hourly data aggregation
+    bookings_col = "bookings" if "bookings" in filtered.columns else ("total_bookings" if "total_bookings" in filtered.columns else None)
+    guests_col = "total_guests" if "total_guests" in filtered.columns else None
+    
+    if bookings_col is None:
+        return {"dates": [], "bookings": [], "message": "No bookings column found"}
+    
+    # Aggregate by date (for daily view) - handle hourly data
+    filtered["ds"] = pd.to_datetime(filtered["ds"])
+    daily_agg = filtered.groupby(filtered["ds"].dt.date).agg({
+        bookings_col: "sum",
+        **({guests_col: "sum"} if guests_col else {})
+    }).reset_index()
+    
+    result = {
+        "dates": [str(d) for d in daily_agg["ds"]],
+        "bookings": daily_agg[bookings_col].tolist()
+    }
+    
+    if guests_col:
+        result["total_guests"] = daily_agg[guests_col].tolist()
+    
+    return result
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
     return {
         "status": "healthy",
         "model_loaded": model is not None,
+        "historical_data_loaded": historical_df is not None,
+        "historical_records": len(historical_df) if historical_df is not None else 0,
         "model_path": str(MODEL_PATH)
     }
 
