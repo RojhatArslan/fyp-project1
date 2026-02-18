@@ -109,6 +109,14 @@
         .key-time .label { font-size: 0.75rem; color: #6b7280; }
         .key-time .value { font-size: 1rem; font-weight: 700; color: #4f46e5; }
         .key-time .guests { font-size: 0.7rem; color: #6b7280; margin-top: 2px; }
+        .comparison-bars { margin-top: 12px; }
+        .comparison-row { margin-bottom: 8px; }
+        .comparison-row .label { font-size: 0.8rem; color: #374151; width: 90px; display: inline-block; }
+        .comparison-row .bar-wrap { display: inline-block; width: calc(100% - 100px); max-width: 400px; vertical-align: middle; }
+        .comparison-row .bar { height: 20px; border-radius: 4px; min-width: 2px; transition: width 0.2s; }
+        .comparison-row .bar.forecast { background: #4f46e5; }
+        .comparison-row .bar.history { background: #6b7280; }
+        .comparison-row .num { font-size: 0.85rem; font-weight: 600; margin-left: 8px; }
     </style>
 </head>
 <body>
@@ -137,10 +145,8 @@
             <div class="results" id="results"></div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         const API_URL = window.location.origin;
-        let comparisonChart = null;
         const KEY_HOURS = [12, 14, 18, 19, 20, 21];
 
         const tomorrow = new Date();
@@ -177,7 +183,7 @@
                     throw new Error(err.detail || 'Request failed');
                 }
                 const data = await res.json();
-                displayResults(data);
+                renderResults(data);
             } catch (err) {
                 errorEl.textContent = err.message;
                 errorEl.style.display = 'block';
