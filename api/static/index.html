@@ -3,307 +3,257 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restaurant Demand Forecasting</title>
+    <title>Restaurant Demand Forecast</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f0f2f5;
             min-height: 100vh;
-            padding: 20px;
+            padding: 24px;
         }
         .container {
-            max-width: 1200px;
+            max-width: 900px;
             margin: 0 auto;
             background: white;
             border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
             overflow: hidden;
         }
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #2d3748;
             color: white;
-            padding: 30px;
+            padding: 24px;
             text-align: center;
         }
-        .content { padding: 40px; }
-        .form-group { margin-bottom: 25px; }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #333;
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        .header p { opacity: 0.9; font-size: 0.95rem; margin-top: 4px; }
+        .content { padding: 28px; }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 140px auto;
+            gap: 16px;
+            align-items: end;
+            margin-bottom: 24px;
         }
+        label { display: block; font-weight: 600; color: #374151; font-size: 0.875rem; margin-bottom: 6px; }
         input[type="date"], input[type="number"] {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
             border-radius: 8px;
-            font-size: 16px;
+            font-size: 15px;
         }
-        input:focus { outline: none; border-color: #667eea; }
+        input:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.2); }
         button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #4f46e5;
             color: white;
             border: none;
-            padding: 14px 32px;
+            padding: 10px 20px;
             border-radius: 8px;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            width: 100%;
         }
-        button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4); }
+        button:hover { background: #4338ca; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .loading { text-align: center; padding: 20px; color: #667eea; display: none; }
-        .error {
-            background: #fee;
-            color: #c33;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            display: none;
-        }
-        .results { margin-top: 30px; display: none; }
-        .daily-summary {
+        .loading { text-align: center; padding: 16px; color: #6b7280; display: none; }
+        .error { background: #fef2f2; color: #b91c1c; padding: 12px; border-radius: 8px; margin-bottom: 16px; display: none; }
+        .results { display: none; margin-top: 24px; }
+        .results h2 { font-size: 1.15rem; color: #111827; margin-bottom: 16px; }
+        .daily-cards {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+            margin-bottom: 28px;
         }
         .day-card {
-            background: #f8f9fa;
-            padding: 15px;
+            background: #f9fafb;
+            padding: 12px;
             border-radius: 8px;
-            border-left: 4px solid #667eea;
+            text-align: center;
+            border: 1px solid #e5e7eb;
         }
-        .day-card .date { font-weight: 600; color: #667eea; margin-bottom: 8px; }
-        .day-card .bookings { font-size: 1.5em; font-weight: bold; color: #333; }
-        .chart-container {
-            margin-top: 30px;
+        .day-card .date { font-size: 0.75rem; color: #6b7280; margin-bottom: 4px; }
+        .day-card .bookings { font-size: 1.25rem; font-weight: 700; color: #111827; }
+        .chart-section {
+            background: #f9fafb;
             padding: 20px;
-            background: #f8f9fa;
             border-radius: 8px;
+            margin-bottom: 24px;
         }
-        .hourly-bar {
-            display: flex;
-            align-items: center;
-            margin-bottom: 8px;
+        .chart-section h3 { font-size: 1rem; color: #374151; margin-bottom: 16px; }
+        .key-times {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
         }
-        .hourly-bar .hour { width: 80px; font-size: 0.9em; color: #666; }
-        .hourly-bar .bar {
-            flex: 1;
-            height: 24px;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            border-radius: 4px;
-            margin-right: 10px;
+        .key-time {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
         }
-        .hourly-bar .value { width: 60px; text-align: right; font-weight: 600; color: #333; }
+        .key-time .label { font-size: 0.8rem; color: #6b7280; }
+        .key-time .value { font-size: 1.1rem; font-weight: 700; color: #4f46e5; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🍽️ Restaurant Demand Forecasting</h1>
-            <p>Predict future booking demand</p>
+            <h1>Restaurant Demand Forecast</h1>
+            <p>Compare forecast with same period last year</p>
         </div>
         <div class="content">
             <form id="predictionForm">
-                <div class="form-group">
-                    <label for="startDate">Start Date</label>
-                    <input type="date" id="startDate" name="startDate" required>
+                <div class="form-row">
+                    <div>
+                        <label for="startDate">Start date</label>
+                        <input type="date" id="startDate" name="startDate" required>
+                    </div>
+                    <div>
+                        <label for="horizonDays">Days ahead</label>
+                        <input type="number" id="horizonDays" name="horizonDays" min="1" max="14" value="7" required>
+                    </div>
+                    <button type="submit" id="submitBtn">Generate forecast</button>
                 </div>
-                <div class="form-group">
-                    <label for="horizonDays">Forecast Horizon (days, max 14)</label>
-                    <input type="number" id="horizonDays" name="horizonDays" min="1" max="14" value="7" required>
-                </div>
-                <button type="submit" id="submitBtn">Generate Forecast</button>
             </form>
-            <div class="loading" id="loading">⏳ Generating predictions...</div>
+            <div class="loading" id="loading">Generating forecast…</div>
             <div class="error" id="error"></div>
             <div class="results" id="results">
-                <h2>📊 Forecast Results</h2>
-                <div class="daily-summary" id="dailySummary"></div>
-                <div class="chart-container">
-                    <h3>Daily Comparison Chart</h3>
-                    <canvas id="comparisonChart"></canvas>
+                <h2>Daily forecast</h2>
+                <div class="daily-cards" id="dailySummary"></div>
+                <div class="chart-section">
+                    <h3>Forecast vs same period last year</h3>
+                    <canvas id="comparisonChart" height="220"></canvas>
                 </div>
-                <div class="chart-container" style="margin-top: 20px;">
-                    <h3>Hourly Predictions</h3>
-                    <div id="hourlyChart"></div>
+                <div class="chart-section">
+                    <h3>Key times (first day) — bookings per hour</h3>
+                    <div class="key-times" id="keyTimes"></div>
                 </div>
             </div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        const API_URL = 'http://localhost:8000';
+        const API_URL = window.location.origin;
         let comparisonChart = null;
-        
-        // Set default date to tomorrow
+        const KEY_HOURS = [12, 14, 18, 19, 20, 21];
+
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         document.getElementById('startDate').valueAsDate = tomorrow;
-        
+
         document.getElementById('predictionForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const startDate = document.getElementById('startDate').value;
             const horizonDays = parseInt(document.getElementById('horizonDays').value);
             const submitBtn = document.getElementById('submitBtn');
             const loading = document.getElementById('loading');
-            const error = document.getElementById('error');
+            const errorEl = document.getElementById('error');
             const results = document.getElementById('results');
-            
+
             submitBtn.disabled = true;
             loading.style.display = 'block';
-            error.style.display = 'none';
+            errorEl.style.display = 'none';
             results.style.display = 'none';
-            
+
             try {
-                // Get predictions
-                const predictResponse = await fetch(`${API_URL}/predict`, {
+                const res = await fetch(`${API_URL}/predict`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         start_date: startDate,
                         horizon_days: horizonDays,
-                        include_previous: true
+                        include_previous: false
                     })
                 });
-                
-                if (!predictResponse.ok) {
-                    const errorData = await predictResponse.json();
-                    throw new Error(errorData.detail || 'Failed to generate predictions');
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Request failed');
                 }
-                
-                const predictData = await predictResponse.json();
-                const historicalData = (predictData.previous_dates && predictData.previous_bookings)
-                    ? { dates: predictData.previous_dates, bookings: predictData.previous_bookings }
-                    : null;
-                displayResults(predictData, historicalData);
+                const data = await res.json();
+                displayResults(data);
             } catch (err) {
-                error.textContent = `Error: ${err.message}`;
-                error.style.display = 'block';
+                errorEl.textContent = err.message;
+                errorEl.style.display = 'block';
             } finally {
                 submitBtn.disabled = false;
                 loading.style.display = 'none';
             }
         });
-        
-        function displayResults(data, historicalData) {
-            const results = document.getElementById('results');
+
+        function displayResults(data) {
             const dailySummary = document.getElementById('dailySummary');
-            const hourlyChart = document.getElementById('hourlyChart');
-            
-            // Display daily summary
+            const keyTimesEl = document.getElementById('keyTimes');
+
             dailySummary.innerHTML = '';
             if (data.aggregated_daily) {
                 data.aggregated_daily.forEach(day => {
                     const card = document.createElement('div');
                     card.className = 'day-card';
-                    card.innerHTML = `
-                        <div class="date">${day.date}</div>
-                        <div class="bookings">${Math.round(day.total_bookings)}</div>
-                        <div style="font-size: 0.9em; color: #666;">bookings</div>
-                    `;
+                    const shortDate = day.date.slice(5);
+                    card.innerHTML = `<div class="date">${shortDate}</div><div class="bookings">${Math.round(day.total_bookings)}</div>`;
                     dailySummary.appendChild(card);
                 });
             }
-            
-            // Display hourly chart (simple bars)
-            hourlyChart.innerHTML = '';
-            const maxPred = Math.max(...data.predictions);
-            data.dates.forEach((date, idx) => {
-                const pred = data.predictions[idx];
-                const bar = document.createElement('div');
-                bar.className = 'hourly-bar';
-                const hour = date.split(' ')[1].split(':')[0];
-                const dateOnly = date.split(' ')[0];
-                const width = (pred / maxPred) * 100;
-                bar.innerHTML = `
-                    <div class="hour">${dateOnly} ${hour}:00</div>
-                    <div class="bar" style="width: ${width}%"></div>
-                    <div class="value">${Math.round(pred)}</div>
-                `;
-                hourlyChart.appendChild(bar);
+
+            const dates = data.dates || [];
+            const preds = data.predictions || [];
+            const firstDayHours = 24;
+            keyTimesEl.innerHTML = '';
+            KEY_HOURS.forEach(h => {
+                if (h < preds.length) {
+                    const val = Math.round(preds[h]);
+                    const label = h + ':00';
+                    keyTimesEl.innerHTML += `<div class="key-time"><div class="label">${label}</div><div class="value">${val}</div></div>`;
+                }
             });
-            
-            // Create comparison chart with Chart.js
-            createComparisonChart(data, historicalData);
-            
-            results.style.display = 'block';
-        }
-        
-        function createComparisonChart(predictData, historicalData) {
-            // Remove old chart if exists
-            const oldCanvas = document.getElementById('comparisonChart');
-            if (oldCanvas) {
-                oldCanvas.remove();
-            }
-            
-            // Create new canvas
-            const chartContainer = document.querySelector('.chart-container');
-            const canvas = document.createElement('canvas');
-            canvas.id = 'comparisonChart';
-            canvas.style.marginTop = '20px';
-            chartContainer.appendChild(canvas);
-            
-            const ctx = canvas.getContext('2d');
-            
-            // Prepare data
-            const predDates = predictData.aggregated_daily.map(d => d.date);
-            const predValues = predictData.aggregated_daily.map(d => Math.round(d.total_bookings));
-            
-            const datasets = [{
-                label: 'Predicted Bookings',
-                data: predValues,
-                borderColor: 'rgb(102, 126, 234)',
-                backgroundColor: 'rgba(102, 126, 234, 0.2)',
-                tension: 0.1
-            }];
-            
-            if (historicalData && historicalData.dates && historicalData.dates.length > 0) {
-                datasets.push({
-                    label: 'Previous (historical) bookings',
-                    data: historicalData.bookings,
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    tension: 0.1
-                });
-            }
-            
-            if (comparisonChart) {
-                comparisonChart.destroy();
-            }
-            
+
+            const predDates = (data.aggregated_daily || []).map(d => d.date.slice(5));
+            const predValues = (data.aggregated_daily || []).map(d => Math.round(d.total_bookings));
+            const lastYear = data.previous_year_bookings || [];
+            const lastYearAligned = predDates.map((_, i) => lastYear[i] != null ? Math.round(lastYear[i]) : null);
+
+            if (comparisonChart) comparisonChart.destroy();
+            const ctx = document.getElementById('comparisonChart').getContext('2d');
             comparisonChart = new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
                     labels: predDates,
-                    datasets: datasets
+                    datasets: [
+                        {
+                            label: 'Forecast',
+                            data: predValues,
+                            backgroundColor: 'rgba(79, 70, 229, 0.7)',
+                            borderColor: 'rgb(79, 70, 229)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Same period last year',
+                            data: lastYearAligned,
+                            backgroundColor: 'rgba(107, 114, 128, 0.6)',
+                            borderColor: 'rgb(107, 114, 128)',
+                            borderWidth: 1
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     plugins: {
-                        title: {
-                            display: true,
-                            text: 'Predicted vs Historical Bookings'
-                        },
-                        legend: {
-                            display: true
-                        }
+                        legend: { display: true, position: 'top' }
                     },
                     scales: {
                         y: {
                             beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Number of Bookings'
-                            }
+                            title: { display: true, text: 'Bookings' }
                         }
                     }
                 }
             });
+
+            document.getElementById('results').style.display = 'block';
         }
     </script>
 </body>

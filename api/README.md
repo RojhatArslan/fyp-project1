@@ -14,13 +14,31 @@ pip install -r api/requirements.txt
 python api/save_model.py
 ```
 
-3. Start the server:
+3. Start the server (choose one method):
+
+**Option A - Simple script (recommended):**
 ```bash
-cd api
-python main.py
+python3 run.py
+```
+or
+```bash
+chmod +x run.sh
+./run.sh
 ```
 
-The API will be available at `http://localhost:8000`
+**Option B - Direct command:**
+```bash
+PYTHONPATH=. python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+**Option C - From api directory:**
+```bash
+cd api
+python3 main.py
+```
+
+The API will automatically find a free port (8000, 8001, 8002...) and print the URL.
+Open `http://localhost:<port>` in your browser to use the web interface.
 
 ## Endpoints
 
