@@ -118,64 +118,86 @@ class DailyAggregation(BaseModel):
     date: str
     total_bookings: float
     avg_per_hour: float
+    total_guests: Optional[float] = None
 
 
 class PredictionResponse(BaseModel):
     """Response model for prediction endpoint."""
     dates: List[str]
     predictions: List[float]
+    guest_predictions: Optional[List[float]] = None  # Hourly head count, same length as predictions
     aggregated_daily: List[DailyAggregation]
     previous_dates: Optional[List[str]] = None
     previous_bookings: Optional[List[float]] = None
-    previous_year_dates: Optional[List[str]] = None  # Same period last year
+    previous_year_dates: Optional[List[str]] = None
     previous_year_bookings: Optional[List[float]] = None
+    comparison_year: Optional[int] = None  # year used for "same period" (e.g. 2023 when data has no 2025)
 
 
-def _get_hourly_patterns() -> Optional[pd.Series]:
-    """Build average bookings per (day_of_week, hour) from historical data. Used for simple forecast."""
+def _get_hourly_patterns() -> tuple[Optional[dict], Optional[dict]]:
+    """Build average bookings and guests per (dow, month, hour) and (dow, hour). Returns (bookings_dict, guests_dict) with keys (dow, month, hour) and (dow, hour) fallback."""
     if historical_df is None and not _ensure_historical_loaded():
-        return None
+        return None, None
     if historical_df is None:
-        return None
+        return None, None
     df = historical_df.copy()
     df["ds"] = pd.to_datetime(df["ds"])
     df["dow"] = df["ds"].dt.dayofweek
+    df["month"] = df["ds"].dt.month
     if "hour" not in df.columns:
-        return None
+        return None, None
     df["hour"] = pd.to_numeric(df["hour"], errors="coerce").fillna(0).astype(int)
     bookings_col = "total_bookings" if "total_bookings" in df.columns else "bookings"
     if bookings_col not in df.columns:
-        return None
-    return df.groupby(["dow", "hour"], as_index=True)[bookings_col].mean()
+        return None, None
+    by_dow_month_hour = df.groupby(["dow", "month", "hour"], as_index=True)[bookings_col].mean()
+    by_dow_hour = df.groupby(["dow", "hour"], as_index=True)[bookings_col].mean()
+    bookings_dict = {"dow_month_hour": by_dow_month_hour, "dow_hour": by_dow_hour}
+    guests_dict = None
+    if "total_guests" in df.columns:
+        g_dmh = df.groupby(["dow", "month", "hour"], as_index=True)["total_guests"].mean()
+        g_dh = df.groupby(["dow", "hour"], as_index=True)["total_guests"].mean()
+        guests_dict = {"dow_month_hour": g_dmh, "dow_hour": g_dh}
+    return bookings_dict, guests_dict
 
 
-def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str], List[float]]:
-    """Generate predictions: use historical hourly patterns when available, else model."""
+def _lookup_pattern(ts: datetime, b_dmh: pd.Series, b_dh: pd.Series) -> float:
+    """Lookup (dow, month, hour) then fallback to (dow, hour)."""
+    key_dmh = (ts.weekday(), ts.month, int(ts.hour))
+    key_dh = (ts.weekday(), int(ts.hour))
+    try:
+        return float(b_dmh.loc[key_dmh])
+    except (KeyError, TypeError):
+        try:
+            return float(b_dh.loc[key_dh])
+        except (KeyError, TypeError):
+            return 1.0
+
+
+def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str], List[float], Optional[List[float]]]:
+    """Generate predictions: use historical hourly patterns when available, else model. Returns (dates, predictions, guest_predictions or None)."""
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    # Build hourly timestamps for the horizon
     timestamps = []
     current = start.replace(hour=0, minute=0, second=0, microsecond=0)
     for day in range(horizon_days):
         for hour in range(24):
             timestamps.append(current + timedelta(days=day, hours=hour))
 
-    # Prefer simple forecast from historical patterns (varies by hour and day)
-    patterns = _get_hourly_patterns()
-    if patterns is not None and len(patterns) > 0:
+    bookings_dict, guests_dict = _get_hourly_patterns()
+    if bookings_dict is not None:
+        b_dmh = bookings_dict["dow_month_hour"]
+        b_dh = bookings_dict["dow_hour"]
         dates = [ts.strftime("%Y-%m-%d %H:00:00") for ts in timestamps]
-        predictions_list = []
-        for ts in timestamps:
-            key = (ts.weekday(), int(ts.hour))
-            try:
-                pred = float(patterns.loc[key])
-            except (KeyError, TypeError):
-                pred = 1.0
-            predictions_list.append(pred)
-        return dates, predictions_list
+        predictions_list = [_lookup_pattern(ts, b_dmh, b_dh) for ts in timestamps]
+        guest_predictions_list = None
+        if guests_dict is not None:
+            g_dmh, g_dh = guests_dict["dow_month_hour"], guests_dict["dow_hour"]
+            guest_predictions_list = [_lookup_pattern(ts, g_dmh, g_dh) for ts in timestamps]
+        return dates, predictions_list, guest_predictions_list
 
     # Fallback: XGBoost model (can be constant when lag/rolling features are zero)
     if model is None:
@@ -201,57 +223,70 @@ def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str],
     predictions = model.predict(df_features)
     dates = [ts.strftime("%Y-%m-%d %H:00:00") for ts in timestamps]
     predictions_list = [float(p) for p in predictions]
-    return dates, predictions_list
+    return dates, predictions_list, None
 
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
     """Generate demand forecasts for specified date range. Optionally include previous historical data."""
-    dates, predictions = generate_predictions(request.start_date, request.horizon_days)
+    dates, predictions, guest_predictions = generate_predictions(request.start_date, request.horizon_days)
     
-    # Aggregate daily predictions
-    daily_aggregated = {}
-    for date_str, pred in zip(dates, predictions):
-        date_only = date_str.split()[0]  # Extract YYYY-MM-DD
+    # Aggregate daily predictions (bookings and guests)
+    daily_aggregated: dict = {}
+    daily_guests: dict = {}
+    for i, (date_str, pred) in enumerate(zip(dates, predictions)):
+        date_only = date_str.split()[0]
         if date_only not in daily_aggregated:
             daily_aggregated[date_only] = []
+            daily_guests[date_only] = []
         daily_aggregated[date_only].append(pred)
-    
-    aggregated_daily = [
-        DailyAggregation(
-            date=date,
-            total_bookings=sum(preds),
-            avg_per_hour=sum(preds) / len(preds)
+        if guest_predictions is not None and i < len(guest_predictions):
+            daily_guests[date_only].append(guest_predictions[i])
+    aggregated_daily = []
+    for date, preds in sorted(daily_aggregated.items()):
+        guests_list = daily_guests.get(date, [])
+        total_guests = sum(guests_list) if guests_list else None
+        aggregated_daily.append(
+            DailyAggregation(
+                date=date,
+                total_bookings=sum(preds),
+                avg_per_hour=sum(preds) / len(preds),
+                total_guests=total_guests
+            )
         )
-        for date, preds in sorted(daily_aggregated.items())
-    ]
     
-    # Same period last year (one value per forecast day for comparison chart)
     previous_year_dates_list: Optional[List[str]] = None
     previous_year_bookings_list: Optional[List[float]] = None
+    comparison_year_val: Optional[int] = None
     if _ensure_historical_loaded() and historical_df is not None:
         try:
             start = datetime.strptime(request.start_date, "%Y-%m-%d")
-            start_last_year = start.replace(year=start.year - 1)
-            n_days = request.horizon_days
-            target_dates = [start_last_year + timedelta(days=i) for i in range(n_days)]
-            bookings_col = "bookings" if "bookings" in historical_df.columns else "total_bookings"
             df = historical_df.copy()
             df["ds"] = pd.to_datetime(df["ds"])
-            daily = df.groupby(df["ds"].dt.date)[bookings_col].sum()
-            previous_year_bookings_list = [float(daily.get(d.date(), 0.0)) for d in target_dates]
-            previous_year_dates_list = [d.strftime("%Y-%m-%d") for d in target_dates]
+            years_available = df["ds"].dt.year.unique()
+            if len(years_available) > 0:
+                ref_year = int(max(years_available))
+                comparison_year_val = ref_year
+                start_ref = start.replace(year=ref_year)
+                n_days = request.horizon_days
+                target_dates = [start_ref + timedelta(days=i) for i in range(n_days)]
+                bookings_col = "bookings" if "bookings" in historical_df.columns else "total_bookings"
+                daily = df.groupby(df["ds"].dt.date)[bookings_col].sum()
+                previous_year_bookings_list = [float(daily.get(d.date(), 0.0)) for d in target_dates]
+                previous_year_dates_list = [d.strftime("%Y-%m-%d") for d in target_dates]
         except Exception:
             pass
 
     return PredictionResponse(
         dates=dates,
         predictions=predictions,
+        guest_predictions=guest_predictions,
         aggregated_daily=aggregated_daily,
         previous_dates=None,
         previous_bookings=None,
         previous_year_dates=previous_year_dates_list,
         previous_year_bookings=previous_year_bookings_list,
+        comparison_year=comparison_year_val,
     )
 
 
@@ -335,15 +370,16 @@ async def get_historical(start_date: str, end_date: str):
 
 @app.get("/health")
 async def health():
-    """Health check endpoint. Use this to see why forecast might not vary (e.g. no historical data)."""
-    patterns = _get_hourly_patterns()
+    """Health check endpoint."""
+    bookings_dict, _ = _get_hourly_patterns()
+    count = len(bookings_dict["dow_hour"]) if bookings_dict else 0
     return {
         "status": "healthy",
         "model_loaded": model is not None,
         "historical_data_loaded": historical_df is not None,
         "historical_records": len(historical_df) if historical_df is not None else 0,
-        "hourly_patterns_available": patterns is not None and len(patterns) > 0,
-        "hourly_pattern_count": len(patterns) if patterns is not None else 0,
+        "hourly_patterns_available": bookings_dict is not None and count > 0,
+        "hourly_pattern_count": count,
         "historical_data_path": str(HISTORICAL_DATA_PATH),
         "model_path": str(MODEL_PATH),
     }

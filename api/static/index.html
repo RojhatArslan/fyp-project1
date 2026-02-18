@@ -28,6 +28,8 @@
         }
         .header h1 { font-size: 1.5rem; font-weight: 600; }
         .header p { opacity: 0.9; font-size: 0.95rem; margin-top: 4px; }
+        .header .data-explainer { font-size: 0.8rem; margin-top: 10px; opacity: 0.85; max-width: 640px; margin-left: auto; margin-right: auto; }
+        .header .data-explainer code { background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
         .content { padding: 28px; }
         .form-row {
             display: grid;
@@ -76,27 +78,37 @@
         }
         .day-card .date { font-size: 0.75rem; color: #6b7280; margin-bottom: 4px; }
         .day-card .bookings { font-size: 1.25rem; font-weight: 700; color: #111827; }
+        .day-card .guests { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
         .chart-section {
             background: #f9fafb;
             padding: 20px;
             border-radius: 8px;
             margin-bottom: 24px;
         }
-        .chart-section h3 { font-size: 1rem; color: #374151; margin-bottom: 16px; }
-        .key-times {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-top: 16px;
-        }
-        .key-time {
+        .chart-section h3 { font-size: 1rem; color: #374151; margin-bottom: 6px; }
+        .chart-section .section-note { font-size: 0.8rem; color: #6b7280; margin-bottom: 12px; }
+        .key-times-by-day { display: flex; flex-direction: column; gap: 16px; }
+        .key-times-day-block {
             background: white;
-            padding: 12px;
+            padding: 14px 16px;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }
-        .key-time .label { font-size: 0.8rem; color: #6b7280; }
-        .key-time .value { font-size: 1.1rem; font-weight: 700; color: #4f46e5; }
+        .key-times-day-block .day-title { font-size: 0.9rem; font-weight: 600; color: #374151; margin-bottom: 10px; }
+        .key-times {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 10px;
+        }
+        .key-time {
+            background: #f9fafb;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .key-time .label { font-size: 0.75rem; color: #6b7280; }
+        .key-time .value { font-size: 1rem; font-weight: 700; color: #4f46e5; }
+        .key-time .guests { font-size: 0.7rem; color: #6b7280; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -104,6 +116,7 @@
         <div class="header">
             <h1>Restaurant Demand Forecast</h1>
             <p>Compare forecast with same period last year</p>
+            <p class="data-explainer">Numbers = <strong>expected bookings and head count (guests)</strong> from your historical data. Forecast depends on <strong>day of week and month</strong> — change the start date to see different numbers. Source: <code>data/processed/daily_bookings.csv</code>.</p>
         </div>
         <div class="content">
             <form id="predictionForm">
@@ -121,18 +134,7 @@
             </form>
             <div class="loading" id="loading">Generating forecast…</div>
             <div class="error" id="error"></div>
-            <div class="results" id="results">
-                <h2>Daily forecast</h2>
-                <div class="daily-cards" id="dailySummary"></div>
-                <div class="chart-section">
-                    <h3>Forecast vs same period last year</h3>
-                    <canvas id="comparisonChart" height="220"></canvas>
-                </div>
-                <div class="chart-section">
-                    <h3>Key times (first day) — bookings per hour</h3>
-                    <div class="key-times" id="keyTimes"></div>
-                </div>
-            </div>
+            <div class="results" id="results"></div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -167,7 +169,8 @@
                         start_date: startDate,
                         horizon_days: horizonDays,
                         include_previous: false
-                    })
+                    }),
+                    cache: 'no-store'
                 });
                 if (!res.ok) {
                     const err = await res.json();
@@ -185,75 +188,75 @@
         });
 
         function displayResults(data) {
-            const dailySummary = document.getElementById('dailySummary');
-            const keyTimesEl = document.getElementById('keyTimes');
-
-            dailySummary.innerHTML = '';
-            if (data.aggregated_daily) {
-                data.aggregated_daily.forEach(day => {
-                    const card = document.createElement('div');
-                    card.className = 'day-card';
-                    const shortDate = day.date.slice(5);
-                    card.innerHTML = `<div class="date">${shortDate}</div><div class="bookings">${Math.round(day.total_bookings)}</div>`;
-                    dailySummary.appendChild(card);
-                });
+            if (comparisonChart) {
+                comparisonChart.destroy();
+                comparisonChart = null;
             }
 
-            const dates = data.dates || [];
+            const daily = data.aggregated_daily || [];
             const preds = data.predictions || [];
-            const firstDayHours = 24;
-            keyTimesEl.innerHTML = '';
-            KEY_HOURS.forEach(h => {
-                if (h < preds.length) {
-                    const val = Math.round(preds[h]);
-                    const label = h + ':00';
-                    keyTimesEl.innerHTML += `<div class="key-time"><div class="label">${label}</div><div class="value">${val}</div></div>`;
-                }
+            const guestPreds = data.guest_predictions || [];
+
+            let dailyCardsHtml = '';
+            daily.forEach(day => {
+                const shortDate = day.date.slice(5);
+                const guestsHtml = day.total_guests != null ? '<div class="guests">' + Math.round(day.total_guests) + ' guests</div>' : '';
+                dailyCardsHtml += '<div class="day-card"><div class="date">' + shortDate + '</div><div class="bookings">' + Math.round(day.total_bookings) + '</div><div style="font-size:0.75rem;color:#6b7280">bookings</div>' + guestsHtml + '</div>';
             });
 
-            const predDates = (data.aggregated_daily || []).map(d => d.date.slice(5));
-            const predValues = (data.aggregated_daily || []).map(d => Math.round(d.total_bookings));
+            let keyTimesHtml = '';
+            daily.forEach((dayInfo, dayIndex) => {
+                const dayLabel = dayIndex === 0 ? 'Day 1' : 'Day ' + (dayIndex + 1);
+                const shortDate = dayInfo.date.slice(5);
+                let row = '<div class="key-times-day-block"><div class="day-title">' + dayLabel + ' — ' + shortDate + '</div><div class="key-times">';
+                KEY_HOURS.forEach(h => {
+                    const idx = dayIndex * 24 + h;
+                    const val = idx < preds.length ? Math.round(preds[idx]) : '—';
+                    const gVal = (guestPreds.length && idx < guestPreds.length) ? Math.round(guestPreds[idx]) : null;
+                    const guestHtml = gVal != null ? '<div class="guests">' + gVal + ' guests</div>' : '';
+                    row += '<div class="key-time"><div class="label">' + h + ':00</div><div class="value">' + val + '</div><div style="font-size:0.7rem;color:#6b7280">bookings</div>' + guestHtml + '</div>';
+                });
+                row += '</div></div>';
+                keyTimesHtml += row;
+            });
+
+            const comparisonLabel = data.comparison_year ? ('Same period (' + data.comparison_year + ')') : 'Same period (history)';
+
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML =
+                '<h2>Daily forecast</h2>' +
+                '<div class="daily-cards" id="dailySummary">' + dailyCardsHtml + '</div>' +
+                '<div class="chart-section"><h3>Forecast vs ' + comparisonLabel + '</h3><div id="chartWrapper"></div></div>' +
+                '<div class="chart-section"><h3>Key times by day — bookings and head count per hour</h3>' +
+                '<p class="section-note">Bookings and guests are historical averages for that weekday and month. Changing the start date changes the forecast.</p>' +
+                '<div class="key-times-by-day" id="keyTimesByDay">' + keyTimesHtml + '</div></div>';
+
+            const predDates = daily.map(d => d.date.slice(5));
+            const predValues = daily.map(d => Math.round(d.total_bookings));
             const lastYear = data.previous_year_bookings || [];
             const lastYearAligned = predDates.map((_, i) => lastYear[i] != null ? Math.round(lastYear[i]) : null);
 
-            if (comparisonChart) comparisonChart.destroy();
-            const ctx = document.getElementById('comparisonChart').getContext('2d');
-            comparisonChart = new Chart(ctx, {
+            const canvas = document.createElement('canvas');
+            canvas.id = 'comparisonChart';
+            canvas.height = 220;
+            document.getElementById('chartWrapper').appendChild(canvas);
+            comparisonChart = new Chart(canvas.getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: predDates,
                     datasets: [
-                        {
-                            label: 'Forecast',
-                            data: predValues,
-                            backgroundColor: 'rgba(79, 70, 229, 0.7)',
-                            borderColor: 'rgb(79, 70, 229)',
-                            borderWidth: 1
-                        },
-                        {
-                            label: 'Same period last year',
-                            data: lastYearAligned,
-                            backgroundColor: 'rgba(107, 114, 128, 0.6)',
-                            borderColor: 'rgb(107, 114, 128)',
-                            borderWidth: 1
-                        }
+                        { label: 'Forecast', data: predValues, backgroundColor: 'rgba(79, 70, 229, 0.7)', borderColor: 'rgb(79, 70, 229)', borderWidth: 1 },
+                        { label: comparisonLabel, data: lastYearAligned, backgroundColor: 'rgba(107, 114, 128, 0.6)', borderColor: 'rgb(107, 114, 128)', borderWidth: 1 }
                     ]
                 },
                 options: {
                     responsive: true,
-                    plugins: {
-                        legend: { display: true, position: 'top' }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: { display: true, text: 'Bookings' }
-                        }
-                    }
+                    plugins: { legend: { display: true, position: 'top' } },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Bookings' } } }
                 }
             });
 
-            document.getElementById('results').style.display = 'block';
+            resultsEl.style.display = 'block';
         }
     </script>
 </body>
