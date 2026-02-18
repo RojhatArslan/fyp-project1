@@ -110,6 +110,7 @@ class PredictionRequest(BaseModel):
     """Request model for prediction endpoint."""
     start_date: str = Field(..., description="Start date in YYYY-MM-DD format", example="2026-02-01")
     horizon_days: int = Field(..., ge=1, le=14, description="Number of days to predict (max 14)", example=7)
+    include_previous: bool = Field(False, description="Include historical bookings for previous 30 days for comparison")
 
 
 class DailyAggregation(BaseModel):
@@ -124,6 +125,8 @@ class PredictionResponse(BaseModel):
     dates: List[str]
     predictions: List[float]
     aggregated_daily: List[DailyAggregation]
+    previous_dates: Optional[List[str]] = None  # Historical dates when include_previous=True
+    previous_bookings: Optional[List[float]] = None  # Historical daily bookings
 
 
 def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str], List[float]]:
@@ -188,7 +191,7 @@ def generate_predictions(start_date: str, horizon_days: int) -> tuple[List[str],
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
-    """Generate demand forecasts for specified date range."""
+    """Generate demand forecasts for specified date range. Optionally include previous historical data."""
     dates, predictions = generate_predictions(request.start_date, request.horizon_days)
     
     # Aggregate daily predictions
@@ -208,10 +211,33 @@ async def predict(request: PredictionRequest):
         for date, preds in sorted(daily_aggregated.items())
     ]
     
+    # Optionally attach previous (historical) data for comparison
+    previous_dates: Optional[List[str]] = None
+    previous_bookings: Optional[List[float]] = None
+    if request.include_previous and _ensure_historical_loaded() and historical_df is not None:
+        try:
+            start = datetime.strptime(request.start_date, "%Y-%m-%d")
+            prev_end = start - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=29)
+            start_str = prev_start.strftime("%Y-%m-%d")
+            end_str = prev_end.strftime("%Y-%m-%d")
+            mask = (pd.to_datetime(historical_df["ds"]) >= prev_start) & (pd.to_datetime(historical_df["ds"]) <= prev_end)
+            filtered = historical_df[mask].copy()
+            if len(filtered) > 0:
+                bookings_col = "bookings" if "bookings" in filtered.columns else "total_bookings"
+                filtered["ds"] = pd.to_datetime(filtered["ds"])
+                daily_agg = filtered.groupby(filtered["ds"].dt.date).agg({bookings_col: "sum"}).reset_index()
+                previous_dates = [str(d) for d in daily_agg["ds"]]
+                previous_bookings = daily_agg[bookings_col].tolist()
+        except Exception:
+            pass
+    
     return PredictionResponse(
         dates=dates,
         predictions=predictions,
-        aggregated_daily=aggregated_daily
+        aggregated_daily=aggregated_daily,
+        previous_dates=previous_dates,
+        previous_bookings=previous_bookings
     )
 
 

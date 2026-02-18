@@ -125,14 +125,21 @@
                 <h2>📊 Forecast Results</h2>
                 <div class="daily-summary" id="dailySummary"></div>
                 <div class="chart-container">
+                    <h3>Daily Comparison Chart</h3>
+                    <canvas id="comparisonChart"></canvas>
+                </div>
+                <div class="chart-container" style="margin-top: 20px;">
                     <h3>Hourly Predictions</h3>
                     <div id="hourlyChart"></div>
                 </div>
             </div>
         </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         const API_URL = 'http://localhost:8000';
+        let comparisonChart = null;
+        
         // Set default date to tomorrow
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -153,19 +160,27 @@
             results.style.display = 'none';
             
             try {
-                const response = await fetch(`${API_URL}/predict`, {
+                // Get predictions
+                const predictResponse = await fetch(`${API_URL}/predict`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ start_date: startDate, horizon_days: horizonDays })
+                    body: JSON.stringify({
+                        start_date: startDate,
+                        horizon_days: horizonDays,
+                        include_previous: true
+                    })
                 });
                 
-                if (!response.ok) {
-                    const errorData = await response.json();
+                if (!predictResponse.ok) {
+                    const errorData = await predictResponse.json();
                     throw new Error(errorData.detail || 'Failed to generate predictions');
                 }
                 
-                const data = await response.json();
-                displayResults(data);
+                const predictData = await predictResponse.json();
+                const historicalData = (predictData.previous_dates && predictData.previous_bookings)
+                    ? { dates: predictData.previous_dates, bookings: predictData.previous_bookings }
+                    : null;
+                displayResults(predictData, historicalData);
             } catch (err) {
                 error.textContent = `Error: ${err.message}`;
                 error.style.display = 'block';
@@ -175,7 +190,7 @@
             }
         });
         
-        function displayResults(data) {
+        function displayResults(data, historicalData) {
             const results = document.getElementById('results');
             const dailySummary = document.getElementById('dailySummary');
             const hourlyChart = document.getElementById('hourlyChart');
@@ -195,7 +210,7 @@
                 });
             }
             
-            // Display hourly chart
+            // Display hourly chart (simple bars)
             hourlyChart.innerHTML = '';
             const maxPred = Math.max(...data.predictions);
             data.dates.forEach((date, idx) => {
@@ -212,7 +227,83 @@
                 `;
                 hourlyChart.appendChild(bar);
             });
+            
+            // Create comparison chart with Chart.js
+            createComparisonChart(data, historicalData);
+            
             results.style.display = 'block';
+        }
+        
+        function createComparisonChart(predictData, historicalData) {
+            // Remove old chart if exists
+            const oldCanvas = document.getElementById('comparisonChart');
+            if (oldCanvas) {
+                oldCanvas.remove();
+            }
+            
+            // Create new canvas
+            const chartContainer = document.querySelector('.chart-container');
+            const canvas = document.createElement('canvas');
+            canvas.id = 'comparisonChart';
+            canvas.style.marginTop = '20px';
+            chartContainer.appendChild(canvas);
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Prepare data
+            const predDates = predictData.aggregated_daily.map(d => d.date);
+            const predValues = predictData.aggregated_daily.map(d => Math.round(d.total_bookings));
+            
+            const datasets = [{
+                label: 'Predicted Bookings',
+                data: predValues,
+                borderColor: 'rgb(102, 126, 234)',
+                backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                tension: 0.1
+            }];
+            
+            if (historicalData && historicalData.dates && historicalData.dates.length > 0) {
+                datasets.push({
+                    label: 'Previous (historical) bookings',
+                    data: historicalData.bookings,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1
+                });
+            }
+            
+            if (comparisonChart) {
+                comparisonChart.destroy();
+            }
+            
+            comparisonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: predDates,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Predicted vs Historical Bookings'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Bookings'
+                            }
+                        }
+                    }
+                }
+            });
         }
     </script>
 </body>
