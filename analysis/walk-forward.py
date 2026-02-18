@@ -1,20 +1,20 @@
-#Walk forward is a time aware way of testing models when my data has a order, like bookings over days and houts
+#Walk forward is a time aware way of testing models when my data has a order, like bookings over days and hours
  import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
-# Load data 
+
 df = pd.read_csv("data/processed/hourly_bookings_cleaned.csv")
 
-# Create datetime column
-df["datetime"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["hour"], unit="h")
 
-# Sort by time
+df["datetime"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["hour"], unit="h") # Create datetime column
+
+
 df = df.sort_values("datetime").reset_index(drop=True) # Sort by time 
 
-# Target variable
+
 y = df["total_bookings"] # Target variable
 
 
@@ -27,8 +27,7 @@ X = df.drop(columns=[  # Feature columns (drop non-features)
     "month"          # same reasoning unless one-hot encoded
 ])
 
-# Walk-forward parameters
-train_size = int(len(df) * 0.6)
+train_size = int(len(df) * 0.6) # Walk-forward parameters
 step_size = int(len(df) * 0.1)
 
 results = []
